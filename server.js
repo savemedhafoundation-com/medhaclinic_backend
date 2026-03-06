@@ -1,5 +1,6 @@
 const http = require('http');
 const dotenv = require('dotenv');
+const User = require("./models/User");
 
 // Load environment variables before importing any modules that depend on them
 dotenv.config();
@@ -25,6 +26,31 @@ const startServer = async () => {
 };
 
 startServer();
+app.post("/users", async (req, res) => {
+
+    try {
+
+        const user = new User(req.body);
+
+        await user.save();
+
+        res.status(201).json({
+            message: "User saved successfully",
+            data: user
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            message: "Error saving user",
+            error: error.message
+        });
+
+    }
+
+});
+
+
 
 process.on('unhandledRejection', err => {
   console.error('Unhandled promise rejection:', err);
