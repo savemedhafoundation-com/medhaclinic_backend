@@ -26,29 +26,35 @@ const startServer = async () => {
 };
 
 startServer();
-app.post("/users", async (req, res) => {
 
-    try {
+app.use("/api/auth", require("./routes/userroutes"));
+app.use("/api/auth", require("./routes/dailyimmunity"));
 
-        const user = new User(req.body);
+// app.use("/api/auth", require("./routes/login"));
 
-        await user.save();
+// app.post("/users", async (req, res) => {
 
-        res.status(201).json({
-            message: "User saved successfully",
-            data: user
-        });
+//     try {
 
-    } catch (error) {
+//         const user = new User(req.body);
 
-        res.status(500).json({
-            message: "Error saving user",
-            error: error.message
-        });
+//         await user.save();
 
-    }
+//         res.status(201).json({
+//             message: "User saved successfully",
+//             data: user
+//         });
 
-});
+//     } catch (error) {
+
+//         res.status(500).json({
+//             message: "Error saving user",
+//             error: error.message
+//         });
+
+//     }
+
+// });
 
 
 
