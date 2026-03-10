@@ -4,7 +4,7 @@ const router = express.Router();
 const DailyImmunity = require("../models/dailyimmunity");
 
 // POST : Save Daily Immunity Check
-router.post("/daily-immunity-check", async (req, res) => {
+router.post("/save_daily_immunity", async (req, res) => {
 
   try {
 
@@ -25,8 +25,8 @@ router.post("/daily-immunity-check", async (req, res) => {
       libidoStability: req.body.libidoStability,
       hairHealth: req.body.hairHealth,
       sleepHours: req.body.sleepHours,
-      immunityScore: req.body.immunityScore,
-      immunityLevel: req.body.immunityLevel
+      immunityScore: req.body.totalScore,
+      immunityLevel: req.body.speedometer
 
     });
 
@@ -51,136 +51,231 @@ router.post("/daily-immunity-check", async (req, res) => {
 router.post("/weekly-report", async (req, res) => {
 
   try {
-
     const { phone } = req.body;
 
     if (!phone) {
       return res.status(400).json({
-        message: "Phone number is required"
+        success: false,
+        message: "Phone number is required",
       });
     }
 
+    // Get latest 2 entries for this phone
     const reports = await DailyImmunity.find({ phone })
       .sort({ createdAt: -1 })
       .limit(2);
 
     if (!reports.length) {
-      return res.json({ message: "No data found" });
+      return res.status(404).json({
+        success: false,
+        message: "No data found",
+      });
     }
 
-
-    /* -------- Average Function -------- */
-
+    /* -----------------------------------------
+       Average Helper
+    ------------------------------------------ */
     const avg = (arr) => {
-      const valid = arr.filter(v => v !== undefined && v !== null);
-      const sum = valid.reduce((a,b)=>a+b,0);
+      const valid = arr.filter(
+        (v) => v !== undefined && v !== null && !isNaN(Number(v))
+      );
+
+      if (!valid.length) return 0;
+
+      const sum = valid.reduce((a, b) => Number(a) + Number(b), 0);
       return Number((sum / valid.length).toFixed(1));
     };
 
+    /* -----------------------------------------
+       Normalize Score
+       If higher value = better, keep as is
+       If lower value = better, reverse score
+       Adjust this based on your frontend scoring
+    ------------------------------------------ */
+    const normalize = (value) => {
+      if (value === undefined || value === null || isNaN(Number(value))) return 0;
+      return Number(value);
+    };
 
-    /* -------- Score Calculation -------- */
-
+    /* -----------------------------------------
+       Score Calculation
+    ------------------------------------------ */
     const calcScores = (data) => {
-
       return {
-
         energyLevels: avg([
-          data.physicalEnergy,
-          data.burningPain,
-          data.sleepHours
+          normalize(data.physicalEnergy),
+          normalize(data.burningPain),
+          normalize(data.sleepHours),
         ]),
 
         digestiveHealth: avg([
-          data.appetite,
-          data.digestionComfort,
-          data.bloatingGas
+          normalize(data.appetite),
+          normalize(data.digestionComfort),
+          normalize(data.bloatingGas),
         ]),
 
         cardiovascular: avg([
-          data.bloodPressure
+          normalize(data.bloodPressure),
         ]),
 
         immuneResponse: avg([
-          data.swelling,
-          data.fever,
-          data.infection
+          normalize(data.swelling),
+          normalize(data.fever),
+          normalize(data.infection),
         ]),
 
         respiratory: avg([
-          data.breathingProblem
+          normalize(data.breathingProblem),
         ]),
 
         hormonalHealth: avg([
-          data.menstrualRegularity,
-          data.libidoStability,
-          data.hairHealth,
-          data.sleepHours
-        ])
+          normalize(data.menstrualRegularity),
+          normalize(data.libidoStability),
+          normalize(data.hairHealth),
+          normalize(data.sleepHours),
+        ]),
       };
-
     };
 
+    /* -----------------------------------------
+       Difference + Trend Helper
+    ------------------------------------------ */
+    const getDifferenceObject = (current, previous) => {
+      const difference = Number((current - previous).toFixed(1));
 
-    /* -------- Current Scores -------- */
+      let trend = "same";
+      if (difference > 0) trend = "up";
+      if (difference < 0) trend = "down";
 
-    const currentScores = calcScores(reports[0]);
-
-
-    /* -------- Previous Scores -------- */
-
-    let previousScores = null;
-    let scoreDifference = null;
-
-    if (reports.length > 1) {
-
-      previousScores = calcScores(reports[1]);
-
-
-      /* -------- Difference Calculation -------- */
-
-      const diff = (current, previous) => {
-        if (!previous) return 0;
-        return Number((current - previous).toFixed(1));
+      return {
+        current,
+        previous,
+        difference,
+        trend,
       };
+    };
 
+    /* -----------------------------------------
+       Current Scores
+    ------------------------------------------ */
+    const currentReport = reports[0];
+    const currentScores = calcScores(currentReport);
 
-      scoreDifference = {
-
-        energyLevels: diff(currentScores.energyLevels, previousScores.energyLevels),
-
-        digestiveHealth: diff(currentScores.digestiveHealth, previousScores.digestiveHealth),
-
-        cardiovascular: diff(currentScores.cardiovascular, previousScores.cardiovascular),
-
-        immuneResponse: diff(currentScores.immuneResponse, previousScores.immuneResponse),
-
-        respiratory: diff(currentScores.respiratory, previousScores.respiratory),
-
-        hormonalHealth: diff(currentScores.hormonalHealth, previousScores.hormonalHealth)
-
-      };
-
+    /* -----------------------------------------
+       If only one entry exists
+    ------------------------------------------ */
+    if (reports.length === 1) {
+      return res.status(200).json({
+        success: true,
+        message: "Only one report found, no previous report available",
+        currentReportDate: currentReport.createdAt,
+        previousReportDate: null,
+        currentScores,
+        previousScores: null,
+        scoreDifference: null,
+      });
     }
 
+    /* -----------------------------------------
+       Previous Scores
+    ------------------------------------------ */
+    const previousReport = reports[1];
+    const previousScores = calcScores(previousReport);
 
-    /* -------- Final Response -------- */
+    /* -----------------------------------------
+       Score Difference
+    ------------------------------------------ */
+    const scoreDifference = {
+      energyLevels: getDifferenceObject(
+        currentScores.energyLevels,
+        previousScores.energyLevels
+      ),
 
-    res.json({
+      digestiveHealth: getDifferenceObject(
+        currentScores.digestiveHealth,
+        previousScores.digestiveHealth
+      ),
+
+      cardiovascular: getDifferenceObject(
+        currentScores.cardiovascular,
+        previousScores.cardiovascular
+      ),
+
+      immuneResponse: getDifferenceObject(
+        currentScores.immuneResponse,
+        previousScores.immuneResponse
+      ),
+
+      respiratory: getDifferenceObject(
+        currentScores.respiratory,
+        previousScores.respiratory
+      ),
+
+      hormonalHealth: getDifferenceObject(
+        currentScores.hormonalHealth,
+        previousScores.hormonalHealth
+      ),
+    };
+
+    /* -----------------------------------------
+       Overall Health Score
+    ------------------------------------------ */
+    const overallCurrent = avg([
+      currentScores.energyLevels,
+      currentScores.digestiveHealth,
+      currentScores.cardiovascular,
+      currentScores.immuneResponse,
+      currentScores.respiratory,
+      currentScores.hormonalHealth,
+    ]);
+
+    const overallPrevious = avg([
+      previousScores.energyLevels,
+      previousScores.digestiveHealth,
+      previousScores.cardiovascular,
+      previousScores.immuneResponse,
+      previousScores.respiratory,
+      previousScores.hormonalHealth,
+    ]);
+
+    const overallDifference = Number(
+      (overallCurrent - overallPrevious).toFixed(1)
+    );
+
+    let overallTrend = "same";
+    if (overallDifference > 0) overallTrend = "up";
+    if (overallDifference < 0) overallTrend = "down";
+
+    /* -----------------------------------------
+       Final Response
+    ------------------------------------------ */
+    return res.status(200).json({
+      success: true,
+      message: "Daily immunity difference fetched successfully",
+
+      currentReportDate: currentReport.createdAt,
+      previousReportDate: previousReport.createdAt,
 
       currentScores,
       previousScores,
-      scoreDifference
 
+      scoreDifference,
+
+      overall: {
+        current: overallCurrent,
+        previous: overallPrevious,
+        difference: overallDifference,
+        trend: overallTrend,
+      },
     });
-
   } catch (error) {
+    console.error("Daily immunity difference error:", error);
 
-    res.status(500).json({
-      message: "Error generating weekly report",
-      error: error.message
-    });                   
-
+    return res.status(500).json({
+      success: false,
+      message: "Server error",  
+      error: error.message,
+    });
   }
-
 });
 module.exports = router;
